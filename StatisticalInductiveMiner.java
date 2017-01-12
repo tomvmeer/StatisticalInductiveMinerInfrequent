@@ -1,15 +1,20 @@
 package org.processmining.martinbauer.plugins;
 
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.List;
+
 import javax.swing.JOptionPane;
 
-import org.deckfour.uitopia.api.event.TaskListener.InteractionResult;
 import org.deckfour.xes.classification.XEventClassifier;
 import org.deckfour.xes.info.XLogInfo;
 import org.deckfour.xes.info.XLogInfoFactory;
+import org.deckfour.xes.model.XEvent;
 import org.deckfour.xes.model.XLog;
+import org.deckfour.xes.model.XTrace;
 import org.processmining.contexts.uitopia.UIPluginContext;
 import org.processmining.contexts.uitopia.annotations.UITopiaVariant;
-import org.processmining.framework.packages.PackageManager.Canceller;
 import org.processmining.framework.plugin.PluginContext;
 import org.processmining.framework.plugin.annotations.Plugin;
 import org.processmining.framework.plugin.annotations.PluginVariant;
@@ -45,11 +50,55 @@ public String /*ProcessTree*/ calculateTraceThreshold(final UIPluginContext cont
 //extract the confidence out of the input parameter, make preprocessing, and call IMProcessTree with new
 //Log and parameters without confidence
 public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
-	//double desiredConfidence=0.95;
-	//double alpha=0.95;
-	//ThresholdCalculator thresholdCalculator=new ThresholdCalculator(alpha, desiredConfidence);
-	//int tracesRequired=thresholdCalculator.calculateThreshold();
-	IMMiningDialog dialog = new IMMiningDialog(log);
+	try{
+	    PrintWriter writer = new PrintWriter("traceView.txt", "UTF-8");
+
+		String threshold=calculateTraceThreshold(context, log);
+		writer.println(threshold);
+		writer.println("\nTraces observed in the Log:");
+		XLog newLog=(XLog) log.clone();
+		String traces;
+		List<String> knownEdges=new ArrayList<>();
+		int edgeCounter=0;
+		List<String> knownEvents=new ArrayList<>();
+		int eventCounter=0;
+		
+		//for each Trace in Log
+		for(int i=0;i<newLog.size();i++){
+			traces="";
+			XTrace currentXTrace=newLog.get(i);
+			String currentEvent="";
+			String priorEvent="";
+			
+			//for each event in Log
+			for(int j=0;j<currentXTrace.size();j++){
+				eventCounter++;
+				priorEvent=currentEvent;
+				XEvent currentXEvent=currentXTrace.get(j);
+				currentEvent=currentXEvent.getAttributes().get("concept:name").toString();
+				if(!knownEvents.contains(currentEvent)){
+					knownEvents.add(currentEvent);
+				}
+				if(!priorEvent.equals("") && !knownEdges.contains("("+priorEvent+","+currentEvent+")")){
+					edgeCounter++;
+					knownEdges.add("("+priorEvent+","+currentEvent+")");
+				}
+				traces=traces+currentXEvent.getAttributes().get("concept:name").toString()+", ";
+			}
+			writer.println(traces.substring(0, traces.length()-2));
+		}
+		writer.println("\nEdges observed in the Log:");
+		writer.println(knownEdges.toString());
+		writer.println((newLog.size()) +" Traces");
+		writer.println(knownEvents.size()+" unique Events (from "+eventCounter+" total Events)");
+		writer.println(knownEdges.size()+" unique Edges (from "+edgeCounter+" total Edges)");
+	    writer.close();
+	} catch (IOException e) {
+	   // do something
+	}
+	return null;
+}
+/*	IMMiningDialog dialog = new IMMiningDialog(log);
 	InteractionResult result = context.showWizard("Mine using Statistical Inductive Miner", true, true, dialog);
 	if (result != InteractionResult.FINISHED || !confirmLargeLogs(context, log, dialog)) {
 		context.getFutureResult(0).cancel(false);
@@ -63,7 +112,7 @@ public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
 			return context.getProgress().isCancelled();
 		}
 	});
-}
+}*/
 
 
 

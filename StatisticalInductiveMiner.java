@@ -3,7 +3,9 @@ package org.processmining.martinbauer.plugins;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.JOptionPane;
 
@@ -13,30 +15,32 @@ import org.deckfour.xes.info.XLogInfoFactory;
 import org.deckfour.xes.model.XEvent;
 import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
+import org.deckfour.xes.model.impl.XLogImpl;
 import org.processmining.contexts.uitopia.UIPluginContext;
 import org.processmining.contexts.uitopia.annotations.UITopiaVariant;
 import org.processmining.framework.plugin.PluginContext;
 import org.processmining.framework.plugin.annotations.Plugin;
 import org.processmining.framework.plugin.annotations.PluginVariant;
 import org.processmining.plugins.InductiveMiner.mining.MiningParameters;
+import org.processmining.plugins.InductiveMiner.plugins.IM;
 import org.processmining.plugins.InductiveMiner.plugins.IMProcessTree;
 import org.processmining.plugins.InductiveMiner.plugins.dialogs.IMMiningDialog;
 import org.processmining.processtree.ProcessTree;
 
 
+
 public class StatisticalInductiveMiner{
 
-@Plugin(name = "Statistical Inductive Miner - calculate Trace Threshold", returnLabels = { "Trace Threshold" }, returnTypes = { String.class }, parameterLabels = {"Log"}, userAccessible = true)
+@Plugin(name = "Statistical Inductive Miner - calculate Trace Threshold", returnLabels = { "Trace Threshold" }, returnTypes = { int.class }, parameterLabels = {"Log"}, userAccessible = true)
 @UITopiaVariant(affiliation = UITopiaVariant.EHV, author = "Martin Bauer", email = "bauermax@informatik.hu-berlin.de")
 @PluginVariant(variantLabel = "Calculate the trace threshold, dialog", requiredParameterLabels = { 0 })
 //prints the trace threshold - use for debugging purposes
-public String /*ProcessTree*/ calculateTraceThreshold(final UIPluginContext context, XLog log) {
+public int /*ProcessTree*/ calculateTraceThreshold(final UIPluginContext context, XLog log) {
 	double threshold=0.05;
 	double confidenceLevel=0.99;
 	ThresholdCalculator thresholdCalculator=new ThresholdCalculator(threshold, confidenceLevel);
-	String thresholdHistory=thresholdCalculator.printThresholdCalculation();
+	int thresholdHistory=thresholdCalculator.getThresholdCalculation();
 	return thresholdHistory;
-	
 }
 
 
@@ -53,20 +57,30 @@ public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
 	try{
 	    PrintWriter writer = new PrintWriter("traceView.txt", "UTF-8");
 
-		String threshold=calculateTraceThreshold(context, log);
-		writer.println(threshold);
-		writer.println("\nTraces observed in the Log:");
-		XLog newLog=(XLog) log.clone();
-		String traces;
-		List<String> knownEdges=new ArrayList<>();
-		int edgeCounter=0;
-		List<String> knownEvents=new ArrayList<>();
-		int eventCounter=0;
+		int threshold=calculateTraceThreshold(context, log);
 		
+		//initialize the data for the preprocessing
+		XLog newLog=new XLogImpl(log.getAttributes());
+		//newLog.removeAll(newLog);
+		String traces="";
+		List<String> knownEdges=new ArrayList<>();
+		List<String> knownEvents=new ArrayList<>();
+		List<String> knownStartingEvents=new ArrayList<>();
+		List<String> knownEndingEvents=new ArrayList<>();
+		Map<String, String> averageEventTimes=new HashMap<>();
+		double averageModelTime=0;
+		int edgeCounter=0;
+		int eventCounter=0;
+		double deltaAverageTimeThresholdInSeconds=1;
+		
+		boolean newInformationGained=false;
+		int tracesWithoutNewInformation=0;
+	
 		//for each Trace in Log
-		for(int i=0;i<newLog.size();i++){
-			traces="";
-			XTrace currentXTrace=newLog.get(i);
+		for(int i=0;i<log.size();i++){
+			newInformationGained=false;
+
+			XTrace currentXTrace=log.get(i);
 			String currentEvent="";
 			String priorEvent="";
 			
@@ -76,27 +90,73 @@ public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
 				priorEvent=currentEvent;
 				XEvent currentXEvent=currentXTrace.get(j);
 				currentEvent=currentXEvent.getAttributes().get("concept:name").toString();
+				
+				//test if the trace contains new information
+				//is the seen event new?
 				if(!knownEvents.contains(currentEvent)){
 					knownEvents.add(currentEvent);
+					newInformationGained=true;
 				}
+				//is the event a new starting node in the df-graph?
+				if(priorEvent.equals("") && !knownStartingEvents.contains(currentEvent)){
+					knownStartingEvents.add(currentEvent);
+					newInformationGained=true;
+				}
+				//is the event a new ending node in the df-graph?
+				if(j==currentXTrace.size()-1 && !knownEndingEvents.contains(currentEvent)){
+					knownEndingEvents.add(currentEvent);
+					newInformationGained=true;
+				}
+				//is the seen edge new?
 				if(!priorEvent.equals("") && !knownEdges.contains("("+priorEvent+","+currentEvent+")")){
-					edgeCounter++;
 					knownEdges.add("("+priorEvent+","+currentEvent+")");
+					newInformationGained=true;
 				}
+				
+				if(!priorEvent.equals("")){
+					edgeCounter++;
+				}
+				
 				traces=traces+currentXEvent.getAttributes().get("concept:name").toString()+", ";
 			}
-			writer.println(traces.substring(0, traces.length()-2));
+			
+			traces=traces.substring(0,(traces.length()-2))+"\n";
+			newLog.add(currentXTrace);
+			
+			//if no new Information has been seen increment counter
+			if(!newInformationGained){
+				tracesWithoutNewInformation++;
+			}
+			//else restart experiment
+			else{
+				tracesWithoutNewInformation=0;
+			}
+			
+			//if threshold has been reached call IM with new log
+			if(tracesWithoutNewInformation==threshold){
+				writer.println("Calculated trace threshold: "+threshold);
+				writer.println((newLog.size()) +" Traces collected (from "+log.size()+" Traces in total)");
+				writer.println("\nTraces observed in the Log:");
+				writer.println(traces);
+				writer.close();
+				IM inductiveMiner= new IM();
+				return inductiveMiner.mineGuiProcessTree(context, newLog);
+			}
 		}
-		writer.println("\nEdges observed in the Log:");
-		writer.println(knownEdges.toString());
-		writer.println((newLog.size()) +" Traces");
-		writer.println(knownEvents.size()+" unique Events (from "+eventCounter+" total Events)");
-		writer.println(knownEdges.size()+" unique Edges (from "+edgeCounter+" total Edges)");
-	    writer.close();
-	} catch (IOException e) {
+		//if whole log has been traversed call IM with original Log, no gain through sIM possible
+		writer.println("Calculated trace threshold: "+threshold);
+		writer.println((newLog.size()) +" Traces collected (from "+log.size()+" Traces in total)");
+		writer.println("\nTraces observed in the Log:");
+		writer.println(traces);
+		writer.close();
+		IM inductiveMiner= new IM();
+		return inductiveMiner.mineGuiProcessTree(context, log);
+
+	}		
+	catch (IOException e) {
 	   // do something
+		return null;
 	}
-	return null;
 }
 /*	IMMiningDialog dialog = new IMMiningDialog(log);
 	InteractionResult result = context.showWizard("Mine using Statistical Inductive Miner", true, true, dialog);

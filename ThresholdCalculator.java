@@ -5,7 +5,7 @@ package org.processmining.martinbauer.plugins;
 //
 public class ThresholdCalculator {
 	private double threshold;			//how small should p be
-	private double confidencelevel;	//how confident are you in the correctness of the experiment
+	private double confidencelevel;		//how confident are you in the correctness of the experiment
 	
 	public ThresholdCalculator(double threshold, double confidencelevel){
 		this.threshold=threshold;
@@ -26,7 +26,7 @@ public class ThresholdCalculator {
 		return tracesRequired;
 	}
 	
-	public String printThresholdCalculation(){
+	public int getThresholdCalculation(){
 		String ThresholdCalculation="";
 		int tracesRequired=0;
 		boolean thresholdReached=false;
@@ -43,6 +43,6 @@ public class ThresholdCalculator {
 			thresholdReached=binComputer.getConfidenceIntervals().getUpperBound() < threshold; 
 		}
 		ThresholdCalculation=ThresholdCalculation+"Required traces: "+tracesRequired;
-		return ThresholdCalculation;
+		return tracesRequired;
 	}
 }

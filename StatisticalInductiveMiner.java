@@ -2,7 +2,10 @@ package org.processmining.martinbauer.plugins;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,26 +56,37 @@ public int /*ProcessTree*/ calculateTraceThreshold(final UIPluginContext context
 @PluginVariant(variantLabel = "Mine a Process Tree, dialog", requiredParameterLabels = { 0 })
 //extract the confidence out of the input parameter, make preprocessing, and call IMProcessTree with new
 //Log and parameters without confidence
-public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
+public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) throws ParseException {
 	try{
+		//Track time for own plugin, IM and whole Plugin
+		long startTime = System.currentTimeMillis();
 	    PrintWriter writer = new PrintWriter("traceView.txt", "UTF-8");
 
 		int threshold=calculateTraceThreshold(context, log);
 		
 		//initialize the data for the preprocessing
+		boolean restrictiveTimeAnalysis=true;
+		
+		double deltaAverageTimeThresholdInSeconds=1; //the threshold for average cycle time analysis
+		
+		//Log and Monitoring variables
 		XLog newLog=new XLogImpl(log.getAttributes());
-		//newLog.removeAll(newLog);
 		String traces="";
+		String experimentInformation="";
+		
+		//Model Analysis
 		List<String> knownEdges=new ArrayList<>();
 		List<String> knownEvents=new ArrayList<>();
 		List<String> knownStartingEvents=new ArrayList<>();
 		List<String> knownEndingEvents=new ArrayList<>();
-		Map<String, String> averageEventTimes=new HashMap<>();
-		double averageModelTime=0;
-		int edgeCounter=0;
-		int eventCounter=0;
-		double deltaAverageTimeThresholdInSeconds=1;
 		
+		
+		//Time Analysis
+		EventTimeObject modelTime=new EventTimeObject(deltaAverageTimeThresholdInSeconds);
+		Map<String, EventTimeObject> eventTimeList=new HashMap<>();
+		SimpleDateFormat dateFormat=new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+		
+		//experiment variables
 		boolean newInformationGained=false;
 		int tracesWithoutNewInformation=0;
 	
@@ -83,44 +97,91 @@ public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
 			XTrace currentXTrace=log.get(i);
 			String currentEvent="";
 			String priorEvent="";
+			Date priorDate=null;
+			Date currentDate=null;
+			
+			//update model cycle time
+			Date modelStartingTime=dateFormat.parse(currentXTrace.get(0).getAttributes().get("time:timestamp").toString());
+			Date modelEndingTime=dateFormat.parse(currentXTrace.get(currentXTrace.size()-1).getAttributes().get("time:timestamp").toString());
+			double modelDifference=(modelEndingTime.getTime()-modelStartingTime.getTime())/1000.0/60.0/60.0/24.0;
+			boolean didModelTimechange=modelTime.addNewEventTime(modelDifference);
+			if(didModelTimechange){
+				if (!newInformationGained)experimentInformation+="New ModelTime at "+tracesWithoutNewInformation+"\n";
+				newInformationGained=true;
+			}
+			
 			
 			//for each event in Log
 			for(int j=0;j<currentXTrace.size();j++){
-				eventCounter++;
+				
 				priorEvent=currentEvent;
+				priorDate=currentDate;
+				
 				XEvent currentXEvent=currentXTrace.get(j);
 				currentEvent=currentXEvent.getAttributes().get("concept:name").toString();
+				currentDate=dateFormat.parse(currentXEvent.getAttributes().get("time:timestamp").toString());
 				
 				//test if the trace contains new information
 				//is the seen event new?
 				if(!knownEvents.contains(currentEvent)){
 					knownEvents.add(currentEvent);
+					if (!newInformationGained)experimentInformation+="New Event at "+tracesWithoutNewInformation+"\n";
 					newInformationGained=true;
+					
 				}
 				//is the event a new starting node in the df-graph?
 				if(priorEvent.equals("") && !knownStartingEvents.contains(currentEvent)){
 					knownStartingEvents.add(currentEvent);
+					if (!newInformationGained)experimentInformation+="New Start at "+tracesWithoutNewInformation+"\n";
 					newInformationGained=true;
 				}
 				//is the event a new ending node in the df-graph?
 				if(j==currentXTrace.size()-1 && !knownEndingEvents.contains(currentEvent)){
 					knownEndingEvents.add(currentEvent);
+					if (!newInformationGained)experimentInformation+="New End at "+tracesWithoutNewInformation+"\n";
 					newInformationGained=true;
+					
 				}
 				//is the seen edge new?
 				if(!priorEvent.equals("") && !knownEdges.contains("("+priorEvent+","+currentEvent+")")){
 					knownEdges.add("("+priorEvent+","+currentEvent+")");
+					if (!newInformationGained)experimentInformation+="New Edge at "+tracesWithoutNewInformation+"\n";
 					newInformationGained=true;
+					
 				}
-				
-				if(!priorEvent.equals("")){
-					edgeCounter++;
+				//has the event changed the average event time of the event? Only on restrictive analysis 
+				if(restrictiveTimeAnalysis){
+					if(j!=0){
+						if (eventTimeList.containsKey(currentEvent)){
+							double difference=(currentDate.getTime()-priorDate.getTime())/1000.0/60.0/60.0/24.0;
+							boolean didTimechange=eventTimeList.get(currentEvent).addNewEventTime(difference);
+							if(didTimechange){
+								if (!newInformationGained)experimentInformation+="New EventTime at "+tracesWithoutNewInformation+"\n";
+								newInformationGained=true;
+							}
+						}
+						else{
+							EventTimeObject newEventTime=new EventTimeObject(deltaAverageTimeThresholdInSeconds);
+							eventTimeList.put(currentEvent, newEventTime);
+							if (!newInformationGained)experimentInformation+="New EventTime at "+tracesWithoutNewInformation+"\n";
+							newInformationGained=true;
+						}	
+					}
+					else if(j==0){
+						if (!eventTimeList.containsKey(currentEvent)){
+							EventTimeObject newEventTime=new EventTimeObject(deltaAverageTimeThresholdInSeconds);
+							eventTimeList.put(currentEvent, newEventTime);
+							if (!newInformationGained)experimentInformation+="New EventTime at "+tracesWithoutNewInformation+"\n";
+							newInformationGained=true;
+							
+						}
+					}
 				}
 				
 				traces=traces+currentXEvent.getAttributes().get("concept:name").toString()+", ";
 			}
 			
-			traces=traces.substring(0,(traces.length()-2))+"\n";
+			traces=i+") "+traces.substring(0,(traces.length()-2))+"\n";
 			newLog.add(currentXTrace);
 			
 			//if no new Information has been seen increment counter
@@ -134,23 +195,43 @@ public ProcessTree mineGuiProcessTree(final UIPluginContext context, XLog log) {
 			
 			//if threshold has been reached call IM with new log
 			if(tracesWithoutNewInformation==threshold){
+				IM inductiveMiner= new IM();
+				long preProcessingEndTime = System.currentTimeMillis();
+				ProcessTree processTree= inductiveMiner.mineGuiProcessTree(context, newLog);
+				long IMEndTime = System.currentTimeMillis();
+				experimentInformation+="Threshold reached. Calling IM with new Log\n";
+				
 				writer.println("Calculated trace threshold: "+threshold);
-				writer.println((newLog.size()) +" Traces collected (from "+log.size()+" Traces in total)");
+				writer.println((newLog.size()) +"/"+log.size()+" Traces collected");
+				writer.println("Time: "+(preProcessingEndTime-startTime)+"+"+(IMEndTime-preProcessingEndTime)+"="+(IMEndTime-startTime));
+				writer.println("Memory: ");
+				writer.println("\nExperiment History:");
+				writer.println(experimentInformation);
 				writer.println("\nTraces observed in the Log:");
 				writer.println(traces);
 				writer.close();
-				IM inductiveMiner= new IM();
-				return inductiveMiner.mineGuiProcessTree(context, newLog);
+				
+				return processTree;
 			}
 		}
 		//if whole log has been traversed call IM with original Log, no gain through sIM possible
+		IM inductiveMiner= new IM();
+		long preProcessingEndTime = System.currentTimeMillis();
+		ProcessTree processTree= inductiveMiner.mineGuiProcessTree(context, newLog);
+		long IMEndTime = System.currentTimeMillis();
+		experimentInformation+="Threshold not reached. Calling IM with original Log\n";
+		
 		writer.println("Calculated trace threshold: "+threshold);
-		writer.println((newLog.size()) +" Traces collected (from "+log.size()+" Traces in total)");
+		writer.println((newLog.size()) +"/"+log.size()+" Traces collected");
+		writer.println("Time: "+((preProcessingEndTime-startTime)/1000.0)+"+"+((IMEndTime-preProcessingEndTime)/1000.0)+"="+((IMEndTime-startTime))/1000.0);
+		writer.println("Memory: ");
+		writer.println("\nExperiment History:");
+		writer.println(experimentInformation);
 		writer.println("\nTraces observed in the Log:");
 		writer.println(traces);
 		writer.close();
-		IM inductiveMiner= new IM();
-		return inductiveMiner.mineGuiProcessTree(context, log);
+		
+		return processTree;
 
 	}		
 	catch (IOException e) {

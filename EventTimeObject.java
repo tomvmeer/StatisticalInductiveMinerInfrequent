@@ -9,18 +9,18 @@ public class EventTimeObject {
 	EventTimeObject(double epsilon){
 		appearances=0;
 		avgEventTime=0;
-		this.epsilon=epsilon;
+		this.epsilon=epsilon*1000*60;
 		
 	}
 	
 	public boolean addNewEventTime(double time){
 		double oldEventTime=this.avgEventTime;
-		this.avgEventTime=this.avgEventTime*appearances;
+		double totalEventTime=this.avgEventTime*appearances;
 		appearances++;
-		this.avgEventTime=(this.avgEventTime+time)/appearances;
+		this.avgEventTime=(totalEventTime+time)/appearances;
 		if(Math.abs(oldEventTime-this.avgEventTime)>this.epsilon){
-			return false;
+			return true;
 		}
-		return true;
+		return false;
 	}
 }

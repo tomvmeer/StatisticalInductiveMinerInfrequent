@@ -24,30 +24,38 @@ import org.deckfour.xes.model.impl.XLogImpl;
 import org.processmining.contexts.uitopia.UIPluginContext;
 import org.processmining.contexts.uitopia.annotations.UITopiaVariant;
 import org.processmining.framework.packages.PackageManager.Canceller;
+import org.processmining.framework.plugin.ProMCanceller;
 import org.processmining.framework.plugin.annotations.Plugin;
 import org.processmining.framework.plugin.annotations.PluginVariant;
+import org.processmining.plugins.InductiveMiner.efficienttree.ProcessTree2EfficientTree;
+import org.processmining.plugins.InductiveMiner.efficienttree.UnknownTreeNodeException;
 import org.processmining.plugins.InductiveMiner.mining.MiningParameters;
 import org.processmining.plugins.InductiveMiner.mining.MiningParametersIM;
 import org.processmining.plugins.InductiveMiner.plugins.IMProcessTree;
 import org.processmining.plugins.InductiveMiner.plugins.dialogs.IMMiningDialog;
 import org.processmining.processtree.ProcessTree;
+import org.processmining.projectedrecallandprecision.framework.CompareParameters.RecallName;
+import org.processmining.projectedrecallandprecision.helperclasses.AutomatonFailedException;
 import org.processmining.projectedrecallandprecision.plugins.CompareLog2ProcessTreePlugin;
+import org.processmining.projectedrecallandprecision.plugins.CompareParametersDialog;
 import org.processmining.projectedrecallandprecision.result.ProjectedRecallPrecisionResult;
+import org.processmining.projectedrecallandprecision.result.ProjectedRecallPrecisionResult.ProjectedMeasuresFailedException;
+
+
 
 public class StatisticalInductiveMiner{
 	
 	//for use in the algorithm
-	double probabilityThreshold=0.05;
+	double probabilityThreshold=0.01;
 	double confidenceLevel=0.99;
-	boolean eventTimeAnalysis=false;
+	boolean eventTimeAnalysis=true;
 	double epsilonInMinutes=5;
 
 
 	//for use in performance analysis
 	double deltaModelIncrement=1;
 	double deltaEventIncrement=1;
-	int NoOfExperiments=5;
-	int NoOfMeasurementsPerExperiment=100;
+	int NoOfExperiments=101;
 	
 	
 	@Plugin(name = "Mine Process Tree with statistical Inductive Miner", returnLabels = { "Process Tree" }, returnTypes = { ProcessTree.class }, parameterLabels = { "Log" }, userAccessible = true)
@@ -64,141 +72,125 @@ public class StatisticalInductiveMiner{
 	}
 	
 	
+	@Plugin(name = "Mine log with statistics", returnLabels = { "Log" }, returnTypes = { XLog.class }, parameterLabels = { "Log" }, userAccessible = true)
+	@UITopiaVariant(affiliation = UITopiaVariant.EHV, author = "Martin Bauer", email = "bauermax@informatik.hu-berlin.de")
+	@PluginVariant(variantLabel = "Mine a Process Tree, dialog", requiredParameterLabels = { 0 })
+	//get mining parameters
+	//preprocess log
+	//mine with new log
+	public XLog mineStatisticalGuiLog(final UIPluginContext context, XLog log) throws Exception {
+			XLog newLog = statisticalPreprocess(log);
+			return newLog;
+	}
 	
-	@Plugin(name = "Analyze performance of statistical Inductive Miner", returnLabels = { "Process Tree" }, returnTypes = { String.class }, parameterLabels = { "Log" }, userAccessible = true)
+	
+	
+	@Plugin(name = "Analyze performance of method paper", returnLabels = { "Process Tree" }, returnTypes = { String.class }, parameterLabels = { "Log" }, userAccessible = true)
 	@UITopiaVariant(affiliation = UITopiaVariant.EHV, author = "Martin Bauer", email = "bauermax@informatik.hu-berlin.de")
 	@PluginVariant(variantLabel = "Mine a Process Tree, dialog", requiredParameterLabels = { 0 })
 	public String ExecuteAnalysis(final UIPluginContext context, XLog log) throws Exception {
-		//get Mining and Fitness calculation Parameters per GUI
+		System.gc();
+		
+		//Analysis criteria that will be measured 
+		String IMpreProcessingTimes=		" preProcessingTime: ";
+		String IMBaseTime=		            " Baseline time:     ";
+		String totalTraces=					" Total Traces:      ";
+		String tracesLeft=					" Traces Left:       ";
+		String IMtotalTimes=				" TotalTime:         ";
+		String IMTotalMemoryConsumption=	" Memory:            ";
+		String IMiPrecisionBefore=		    " Baseline Precison: ";
+		String IMiRecallBefore=		        " Baseline Recall:   ";
+		String IMiPrecision=				" Precision:         ";
+		String IMiRecall=					" Recall:            ";	
+		String IMiPrecisionPaper=			" Precision Paper:   ";
+		String IMiRecallPaper=				" Recall Paper:      ";	
+	
+		
+		String filename = "C:\\Users\\mr\\Desktop\\data\\output";
+		System.out.println("Starting sIM Analysis - Results will be written to "+filename+".txt");
+		totalTraces=totalTraces + Integer.toString(log.size());
+		
+		//get Mining Parameters per GUI
 		MiningParameters parameters= getMiningParameters(context, log);
-		MiningParameters iMParameters=new MiningParametersIM();
-		iMParameters.setNoiseThreshold((float) 0.0);
-		CompareLog2ProcessTreePlugin fitnessCalculator= new CompareLog2ProcessTreePlugin();
 		
-		for(int i=1;i<=NoOfExperiments;i++){
+		//k times
+		System.gc();
+		for(int k=1;k<=NoOfExperiments;k++){
 			System.gc();
-			//set the Threshold Parameters;
-			if(!eventTimeAnalysis){
-				if(i>1){
-					epsilonInMinutes+=deltaModelIncrement;
-				}
-			}	
+			System.out.println("\tStarting Measurement "+(k)+" of "+NoOfExperiments);
 			
-			if(eventTimeAnalysis){
-				if(i>1){
-					epsilonInMinutes+=deltaEventIncrement;
-				}
-			}
-			
-			
-			//Analysis criteria that will be measured 
-			String sIMpreProcessingTimes=		"sIMi - preProcessingTime: ";
-			String sIMminingTimes=				"sIMi - MiningTime:        ";
-			String sIMtotalTimes=				"sIMi - TotalTime:         ";
-			String sIMtotalMemoryConsumption=	"sIMi - TotalMemory:       ";
-			String totalTraces=					" IM  - Total Traces:      ";
-			String sIMTraces=					"sIM  - Traces:           ";
-			String IMtotalTimes=				" IMi - TotalTime:         ";
-			String IMTotalMemoryConsumption=	" IMi - Memory:            ";
-			String IMFitness=					" IM  - Fitness:           ";
-			String IMiFitness=					" IMi - Fitness:           ";	
-			String sIMiFitness=					"sIMi - Fitness:           ";
-		
-			
-			String filename = "Log_";
-			if(eventTimeAnalysis){
-				filename+="restrictive"+"_"+epsilonInMinutes;
-			}
-			else filename+="lax"+"_"+epsilonInMinutes;
-			System.out.println("Starting sIM Analysis "+i+" of "+NoOfExperiments+" - Results will be written to"+filename+".txt");
-			totalTraces=Integer.toString(log.size());
-			
-			//IM
-			if(i==1){
 			System.out.println("\tCalculating Fitness and Precision of unfiltered IM");
 			System.out.println("\t\t IM - Mining");
-			ProcessTree iMProcessTree=mineProcessTree(context, log, iMParameters);
+			long baseStart = System.currentTimeMillis();
+			ProcessTree iMProcessTree=mineProcessTree(context, log, parameters);
+			long baseEnd = System.currentTimeMillis();
 			System.out.println("\t\t IM - Calculating Fitness");
-			ProjectedRecallPrecisionResult iMFitnessResult=fitnessCalculator.measure1(context, log, iMProcessTree);
-			IMFitness=Double.toString(iMFitnessResult.getRecall());
-			}
+			CompareLog2ProcessTreePlugin fitnessCalculator= new CompareLog2ProcessTreePlugin();
+			ProjectedRecallPrecisionResult iMFitnessResult=fitnessCalculator.measure(context, log, iMProcessTree);
+			IMiPrecisionBefore=IMiPrecisionBefore + Double.toString(iMFitnessResult.getPrecision())+", ";
+			IMiRecallBefore=IMiRecallBefore+ Double.toString(iMFitnessResult.getRecall())+", ";
 			
-			//k times
-			System.gc();
-			for(int k=1;k<=NoOfMeasurementsPerExperiment;k++){
-				System.gc();
-				System.out.println("\tStarting Measurement "+(k)+" of "+NoOfMeasurementsPerExperiment);
-				
-				//sIMi
-				System.out.println("\t\t sIMi - PreProcessing");
-				
-				long preProcessingStart = System.currentTimeMillis();
-				double sIMStartMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
-				XLog newLog=statisticalPreprocess(log);
-				long preProcessingEnd = System.currentTimeMillis();
-				System.out.println("\t\t sIMi - Mining");
-				long sIMStart = System.currentTimeMillis();
-				ProcessTree statisticalProcessTree = mineProcessTree(context, newLog, parameters);
-				double sIMEndMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
-				long sIMEnd = System.currentTimeMillis();
-				System.out.println("\t\t sIMi - Calculating Fitness");
-				ProjectedRecallPrecisionResult sIMiFitnessResult=fitnessCalculator.measure1(context, newLog, statisticalProcessTree);
-				
-				//IMi
-				System.out.println("\t\t IMi - Mining");
-				long IMStart = System.currentTimeMillis();
-				double IMStartMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
-				ProcessTree processTree = mineProcessTree(context, log, parameters);
-				double IMEndMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
-				long IMEnd = System.currentTimeMillis();
-				if(k==1 && i==1){
-					System.out.println("\t\t IMi -Calculating Fitness");
-					ProjectedRecallPrecisionResult IMiFitnessResult=fitnessCalculator.measure1(context, log, processTree);
-					IMiFitness=IMiFitness+", "+Double.toString(IMiFitnessResult.getRecall());
-				}
-				long preProcessingTime=preProcessingEnd-preProcessingStart;
-				long sIMMiningTime=sIMEnd-sIMStart;
-				long sIMTime=preProcessingTime+sIMMiningTime;
-				long IMTime=IMEnd-IMStart;
-				double  sIMMemory = sIMEndMemory-sIMStartMemory;
-				double  IMMemory = IMEndMemory-IMStartMemory;
-	
-				
-				sIMpreProcessingTimes=sIMpreProcessingTimes+preProcessingTime+",";
-				sIMminingTimes=sIMminingTimes+sIMMiningTime+",";
-				sIMtotalTimes=sIMtotalTimes+sIMTime+",";
-				IMtotalTimes=IMtotalTimes+IMTime+",";
-				sIMtotalMemoryConsumption=sIMtotalMemoryConsumption+sIMMemory+",";
-				IMTotalMemoryConsumption=IMTotalMemoryConsumption+IMMemory+",";
-				sIMiFitness=sIMiFitness+","+Double.toString(sIMiFitnessResult.getRecall());
-				
-	
-				
-				
-				sIMTraces=sIMTraces+newLog.size()+",";
-			}
-			try{
-			    PrintWriter writer = new PrintWriter(filename, "UTF-8");
-			    writer.println("===Runtime analysis===");
-			    writer.println(IMtotalTimes);
-			    writer.println(sIMpreProcessingTimes);
-			    writer.println(sIMminingTimes);
-			    writer.println(sIMtotalTimes+"\n");
-			    writer.println("===Trace analysis===");
-			    writer.println(totalTraces);
-			    writer.println(sIMTraces+"\n");
-			    writer.println("===Memory analysis===");
-			    writer.println(IMTotalMemoryConsumption);
-			    writer.println(sIMtotalMemoryConsumption+"\n");
-			    writer.println("===Fitness analysis===");
-			    writer.println(IMiFitness);
-			    writer.println(sIMiFitness+"\n");
-			    writer.close();
-			} catch (IOException e) {
-			   // do something
-			}
+			//IMi
+			System.out.println("\t\t PreProcessing");
+			
+			long preProcessingStart = System.currentTimeMillis();
+			XLog newLog=statisticalPreprocess(log);
+			long preProcessingEnd = System.currentTimeMillis();
+			
+			
+			System.out.println("\t\t IMi - Mining");
+			long IMStart = System.currentTimeMillis();
+			double IMStartMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
+			ProcessTree processTree = mineProcessTree(context, newLog, parameters);
+			double IMEndMemory = (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory())/ 1024d / 1024d;
+			long IMEnd = System.currentTimeMillis();
+			System.out.println("\t\t IMi -Calculating Fitness");
+			fitnessCalculator= new CompareLog2ProcessTreePlugin();
+			ProjectedRecallPrecisionResult IMiFitnessResult=fitnessCalculator.measure(context, log, processTree);
+			
+			fitnessCalculator= new CompareLog2ProcessTreePlugin();
+			ProjectedRecallPrecisionResult IMiFitnessResultPaper=fitnessCalculator.measure(context, newLog, processTree);
+
+
+			long preProcessingTime=preProcessingEnd-preProcessingStart;
+			long IMTime=IMEnd-IMStart;
+			long baseTime=baseEnd-baseStart;
+			double  IMMemory = IMEndMemory-IMStartMemory;
+
+			IMiPrecision=IMiPrecision+Double.toString(IMiFitnessResult.getPrecision())+", ";
+			IMiRecall=IMiRecall+Double.toString(IMiFitnessResult.getRecall())+", ";
+			
+			IMiPrecisionPaper=IMiPrecisionPaper+Double.toString(IMiFitnessResultPaper.getPrecision())+", ";
+			IMiRecallPaper=IMiRecallPaper+Double.toString(IMiFitnessResultPaper.getRecall())+", ";
+			
+			
+			IMpreProcessingTimes=IMpreProcessingTimes+preProcessingTime+", ";
+			IMtotalTimes=IMtotalTimes+IMTime+", ";
+			IMTotalMemoryConsumption=IMTotalMemoryConsumption+IMMemory+", ";
+			tracesLeft=tracesLeft+newLog.size()+", ";
+			
+			IMBaseTime = IMBaseTime + baseTime +", ";
+			
+			PrintWriter writer = new PrintWriter(filename + epsilonInMinutes + k  + ".txt", "UTF-8");
+		    writer.println("===Runtime analysis===");
+		    writer.println(IMtotalTimes);
+		    writer.println(IMpreProcessingTimes);
+		    writer.println(IMBaseTime);
+		    writer.println("===Trace analysis===");
+		    writer.println(totalTraces);
+		    writer.println(tracesLeft);
+		    writer.println("===Memory analysis===");
+		    writer.println(IMTotalMemoryConsumption);
+		    writer.println("===Conformance analysis===");
+		    writer.println(IMiRecallBefore);
+		    writer.println(IMiPrecisionBefore);
+		    writer.println(IMiPrecision);
+		    writer.println(IMiRecall);
+		    writer.println(IMiPrecisionPaper);
+		    writer.println(IMiRecallPaper);
+		    writer.close();
 		}
-		return "Experiment finished without Errors";
+	return "Experiment finished without Errors";
 	}
 	
 	
